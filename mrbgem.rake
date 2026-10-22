@@ -36,14 +36,12 @@ MRuby::Gem::Specification.new('mruby-onig-regexp') do |spec|
 
     file header do |t|
       FileUtils.mkdir_p oniguruma_dir
-      Dir.chdir(build_dir) do
-        _pp 'extracting', "onigmo-#{version}"
-        `gzip -dc "#{dir}/onigmo-#{version}.tar.gz" | tar xf -`
-      end
+      _pp 'extracting', "onigmo-#{version}"
+      `cd "#{build_dir}" && gzip -dc "#{dir}/onigmo-#{version}.tar.gz" | tar xf -`
     end
 
-    def run_command(env, command)
-      unless system(env, command)
+    def run_command(env, command, chdir)
+      unless system(env, command, chdir: chdir)
         fail "#{command} failed"
       end
     end
@@ -53,7 +51,7 @@ MRuby::Gem::Specification.new('mruby-onig-regexp') do |spec|
     objext = visualcpp ? '.obj' : '.o'
 
     file oniguruma_lib => header do |t|
-      Dir.chdir(oniguruma_dir) do
+      begin
         e = {
           'CC' => "#{build.cc.command} #{build.cc.flags.join(' ')}",
           'CXX' => "#{build.cxx.command} #{build.cxx.flags.join(' ')}",
@@ -65,28 +63,28 @@ MRuby::Gem::Specification.new('mruby-onig-regexp') do |spec|
           end
 
           _pp 'autotools', oniguruma_dir
-          run_command e, './autogen.sh' if File.exist? 'autogen.sh'
-          run_command e, "./configure --disable-shared --enable-static #{host}"
-          run_command e, "make -j#{$rake_jobs || 1} libonigmo.la onigmo.pc"
+          run_command e, './autogen.sh', oniguruma_dir if File.exist? "#{oniguruma_dir}/autogen.sh"
+          run_command e, "./configure --disable-shared --enable-static #{host}", oniguruma_dir
+          run_command e, "make -j#{$rake_jobs || 1} libonigmo.la onigmo.pc", oniguruma_dir
         else
-          run_command e, 'cmd /c "copy /Y win32 > NUL"'
+          run_command e, 'cmd /c "copy /Y win32 > NUL"', oniguruma_dir
           if visualcpp
-            run_command e, 'nmake -f Makefile'
+            run_command e, 'nmake -f Makefile', oniguruma_dir
           else
-            run_command e, 'make -f Makefile.mingw'
+            run_command e, 'make -f Makefile.mingw', oniguruma_dir
           end
         end
       end
 
       FileUtils.mkdir_p libonig_objs_dir
-      Dir.chdir(libonig_objs_dir) do
+      begin
         unless visualcpp
-          `ar x #{oniguruma_lib}`
+          `cd "#{libonig_objs_dir}" && ar x #{oniguruma_lib}`
         else
           winname = oniguruma_lib.gsub(%'/', '\\')
           `lib -nologo -list #{winname}`.each_line do |line|
             line.chomp!
-            `lib -nologo -extract:#{line} #{winname}`
+            `cd /d "#{libonig_objs_dir}" && lib -nologo -extract:#{line} #{winname}`
           end
         end
       end
