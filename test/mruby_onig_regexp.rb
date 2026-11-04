@@ -371,6 +371,11 @@ assert('String#onig_regexp_scan') do
 
   assert_equal [""] * (test_str.length + 1), test_str.onig_regexp_scan(OnigRegexp.new(''))
   assert_equal [""], "".onig_regexp_scan(OnigRegexp.new(''))
+  # An unmatched group is nil, as in CRuby, not an empty string.
+  assert_equal [[nil, 'b'], ['a', nil]], 'ba'.onig_regexp_scan(OnigRegexp.new('(a)|(b)'))
+  pairs = []
+  'ba'.onig_regexp_scan(OnigRegexp.new('(a)|(b)')) { |x, y| pairs << [x, y] }
+  assert_equal [[nil, 'b'], ['a', nil]], pairs
 end
 
 assert('String#onig_regexp_sub') do

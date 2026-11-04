@@ -175,6 +175,16 @@ onig_str_substr(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len)
 #endif
 }
 
+// A capture group that did not participate in the match reads as nil, as in CRuby (scan, to_a).
+static mrb_value
+onig_group_substr(mrb_state *mrb, mrb_value str, OnigRegion *m, int i)
+{
+  if(m->beg[i] == ONIG_REGION_NOTPOS) {
+    return mrb_nil_value();
+  }
+  return onig_str_substr(mrb, str, m->beg[i], m->end[i] - m->beg[i]);
+}
+
 static mrb_value
 onig_regexp_initialize(mrb_state *mrb, mrb_value self) {
   mrb_value str, flag = mrb_nil_value(), code = mrb_nil_value();
@@ -985,7 +995,7 @@ string_scan(mrb_state* mrb, mrb_value self) {
       } else {
         mrb_value const elem = mrb_ary_new_capa(mrb, m->num_regs - 1);
         for(i = 1; i < m->num_regs; ++i) {
-          mrb_ary_push(mrb, elem, onig_str_substr(mrb, self, m->beg[i], m->end[i] - m->beg[i]));
+          mrb_ary_push(mrb, elem, onig_group_substr(mrb, self, m, i));
         }
         mrb_ary_push(mrb, result, elem);
       }
@@ -996,7 +1006,7 @@ string_scan(mrb_state* mrb, mrb_value self) {
       } else {
         mrb_value argv = mrb_ary_new_capa(mrb, m->num_regs - 1);
         for(i = 1; i < m->num_regs; ++i) {
-          mrb_ary_push(mrb, argv, onig_str_substr(mrb, self, m->beg[i], m->end[i] - m->beg[i]));
+          mrb_ary_push(mrb, argv, onig_group_substr(mrb, self, m, i));
         }
         mrb_yield(mrb, blk, argv);
       }
