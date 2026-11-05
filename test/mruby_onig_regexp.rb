@@ -26,6 +26,15 @@ assert('OnigRegexp.last_match', '15.2.15.6.3') do
   assert_nil OnigRegexp.last_match
 end
 
+assert('OnigRegexp.last_match with a group index') do
+  OnigRegexp.new('(a)(b)') =~ 'xab'
+  assert_equal 'a', OnigRegexp.last_match(1)
+  assert_equal 'b', OnigRegexp.last_match(2)
+
+  OnigRegexp.new('zzz') =~ 'ginka'
+  assert_nil OnigRegexp.last_match(1)
+end
+
 assert('OnigRegexp.quote', '15.2.15.6.4') do
   assert_equal '\n', OnigRegexp.quote("\n")
 end
