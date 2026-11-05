@@ -10,9 +10,11 @@ class OnigRegexp
     @memo[as]
   end
 
-  # ISO 15.2.15.6.3
-  def self.last_match
-    @last_match
+  # ISO 15.2.15.6.3. With an index, the group of the last match (CRuby's Regexp.last_match(n)).
+  def self.last_match(index = nil)
+    return @last_match if index.nil? || @last_match.nil?
+
+    @last_match[index]
   end
 
   def self.last_match=(match)
