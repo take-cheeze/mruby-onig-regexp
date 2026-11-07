@@ -165,7 +165,11 @@ static mrb_value
 onig_str_substr(mrb_state *mrb, mrb_value str, mrb_int beg, mrb_int len)
 {
 #ifdef MRB_UTF8_STRING
-  if (len > 0) {
+  if (len > 32) {
+    // A long piece (the text before or after a match: $` and $') shares the string's buffer, as byteslice does.
+    // Copying it would cost the whole text for every match of a scan, which is quadratic in the text's length.
+    return mrb_funcall_id(mrb, str, MRB_SYM(byteslice), 2, mrb_fixnum_value(beg), mrb_fixnum_value(len));
+  } else if (len > 0) {
     return mrb_str_new(mrb, RSTRING_PTR(str) + beg, len);
   } else {
     return mrb_str_new(mrb, NULL, 0);
