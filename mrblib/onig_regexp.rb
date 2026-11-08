@@ -174,6 +174,13 @@ class String
   alias_method :old_index, :index
 
   def index(pattern, pos=0)
+    # Single-byte text (byte and character offsets agree): search from the offset in place. Taking self[pos..-1] and
+    # matching that copied the tail on every call, which made a loop of index(regexp, pos) over a large text quadratic.
+    # MatchData#begin and match's position are byte offsets, as they are here.
+    if pattern.is_a?(OnigRegexp) && pos.is_a?(Integer) && pos >= 0 && pos < bytesize && bytesize == size
+      match_data = pattern.match(self, pos)
+      return match_data && match_data.begin(0)
+    end
     if OnigRegexp.regexp_arg?(pattern)
       str = self[pos..-1]
       if str

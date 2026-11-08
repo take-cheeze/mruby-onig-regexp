@@ -673,4 +673,14 @@ assert('OnigRegexp.last_match in the block of scan and gsub is the current match
   assert_equal ['', 'x-', 'x-y-'], pre
 end
 
+assert('String#index with a regexp and a position') do
+  re = OnigRegexp.new('o')
+  assert_equal 4, 'hello world'.index(re)
+  assert_equal 7, 'hello world'.index(re, 5)
+  assert_nil 'hello world'.index(re, 8)
+  assert_equal 3, 'abc'.index(OnigRegexp.new('$'), 3)
+  assert_nil 'abc'.index(OnigRegexp.new('x'), 1)
+  assert_equal 'o', OnigRegexp.last_match(0) if 'hello world'.index(re, 5)
+end
+
 Regexp = prev_regexp
