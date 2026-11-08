@@ -26,6 +26,15 @@ assert('OnigRegexp.last_match', '15.2.15.6.3') do
   assert_nil OnigRegexp.last_match
 end
 
+assert('OnigRegexp.last_match with a group index') do
+  OnigRegexp.new('(a)(b)') =~ 'xab'
+  assert_equal 'a', OnigRegexp.last_match(1)
+  assert_equal 'b', OnigRegexp.last_match(2)
+
+  OnigRegexp.new('zzz') =~ 'ginka'
+  assert_nil OnigRegexp.last_match(1)
+end
+
 assert('OnigRegexp.quote', '15.2.15.6.4') do
   assert_equal '\n', OnigRegexp.quote("\n")
 end
@@ -91,6 +100,24 @@ assert("OnigRegexp#source", '15.2.15.7.8') do
   reg = OnigRegexp.new(str)
 
   assert_equal str, reg.source
+end
+
+assert("OnigRegexp#named_captures") do
+  reg = OnigRegexp.new("(?<a>a)(?<b>b)(?<a>a)")
+  expect = {"a" => [1,3], "b" => [2]}
+  assert_equal expect, reg.named_captures
+
+  reg = OnigRegexp.new("(.)(.)")
+  assert_equal({}, reg.named_captures)
+end
+
+
+assert("OnigRegexp#names") do
+  reg = OnigRegexp.new("(?<a>a)(?<b>b)(?<c>c)")
+  assert_equal %w[a b c], reg.names
+
+  reg = OnigRegexp.new("(.)(.)")
+  assert_equal [], reg.names
 end
 
 if OnigRegexp.const_defined? :ASCII_RANGE
@@ -282,6 +309,29 @@ assert('OnigMatchData#regexp') do
   assert_equal '(\w+)(\w)', onig_match_data_example.regexp.source
 end
 
+assert('OnigMatchData#named_captures') do
+  # Skip if mruby-array-ext gem is not available
+  skip unless Array.respond_to?(:to_h)
+
+  m = OnigRegexp.new("(?<a>.)(?<b>.)").match("01")
+  assert_equal({"a" => "0", "b" => "1"}, m.named_captures)
+
+  m = OnigRegexp.new("(?<a>.)(?<b>.)?").match("0")
+  assert_equal({"a" => "0", "b" => nil}, m.named_captures)
+
+  m = OnigRegexp.new("(?<a>.)(?<a>.)").match("01")
+  assert_equal({"a" => "1"}, m.named_captures)
+
+  m = OnigRegexp.new("(?<a>.)(?<b>.)").match("01")
+  assert_equal({a: "0", b: "1"}, m.named_captures(symbolize_names: true))
+end
+
+assert('OnigMatchData#names') do
+  reg = OnigRegexp.new("(?<a>a)(?<b>b)(?<c>c)")
+  m = reg.match("abc")
+  assert_equal %w[a b c], m.names
+end
+
 assert('Invalid regexp') do
   assert_raise(RegexpError) { OnigRegexp.new '[aio' }
 end
@@ -330,6 +380,11 @@ assert('String#onig_regexp_scan') do
 
   assert_equal [""] * (test_str.length + 1), test_str.onig_regexp_scan(OnigRegexp.new(''))
   assert_equal [""], "".onig_regexp_scan(OnigRegexp.new(''))
+  # An unmatched group is nil, as in CRuby, not an empty string.
+  assert_equal [[nil, 'b'], ['a', nil]], 'ba'.onig_regexp_scan(OnigRegexp.new('(a)|(b)'))
+  pairs = []
+  'ba'.onig_regexp_scan(OnigRegexp.new('(a)|(b)')) { |x, y| pairs << [x, y] }
+  assert_equal [[nil, 'b'], ['a', nil]], pairs
 end
 
 assert('String#onig_regexp_sub') do
@@ -405,6 +460,15 @@ assert('String#onig_regexp_split') do
 
   assert_equal ["こ", "に", "ち", "わ"], "こ,に,ち,わ".onig_regexp_split(",")
   assert_raise(TypeError) { "".onig_regexp_split(1) }
+
+  # A Regexp literal can resolve to another Regexp implementation (e.g. mruby
+  # core mruby-regexp) when it is built alongside this gem. split must still
+  # accept it instead of trying to coerce it into a String.
+  assert_equal ['JP', 'US', ' UK'], 'JP,US, UK'.onig_regexp_split(/,/)
+  assert_equal [], ''.onig_regexp_split(/,/)
+  if Regexp != OnigRegexp
+    assert_equal ['JP', 'US', ' UK'], 'JP,US, UK'.onig_regexp_split(Regexp.new(','))
+  end
 end
 
 assert('String#onig_regexp_match') do
@@ -570,6 +634,53 @@ assert('OnigRegexp not default') do
   $~ = nil
   onig_match_data_example
   assert_nil $~
+end
+
+Regexp = prev_regexp
+
+# When another implementation owns the Regexp constant (e.g. mruby core
+# mruby-regexp), an OnigRegexp argument must still be accepted by these
+# methods instead of falling through to the non-regexp code path. Use a
+# distinct narrow class to stand in for the foreign Regexp.
+foreign_regexp = Class.new
+prev_regexp = Regexp
+Regexp = foreign_regexp
+
+assert('String regexp methods accept OnigRegexp when Regexp is foreign') do
+  assert_not_equal OnigRegexp, Regexp
+
+  assert_equal 'o ', 'hello world'[OnigRegexp.new('o.')]
+  assert_equal 6, 'hello world'.index(OnigRegexp.new('world'))
+
+  string = 'abc'
+  string[OnigRegexp.new('.')] = 'A'
+  assert_equal 'Abc', string
+
+  string = 'hello'
+  assert_equal 'el', string.slice!(OnigRegexp.new('el'))
+  assert_equal 'hlo', string
+end
+
+assert('OnigRegexp.last_match in the block of scan and gsub is the current match') do
+  seen = []
+  'a1 b22 c333'.scan(OnigRegexp.new('[a-z]\\d+')) { seen << OnigRegexp.last_match(0) }
+  assert_equal %w[a1 b22 c333], seen
+  groups = []
+  'a1 b22 c333'.scan(OnigRegexp.new('([a-z])(\\d+)')) { groups << [OnigRegexp.last_match(1), OnigRegexp.last_match(2)] }
+  assert_equal [%w[a 1], %w[b 22], %w[c 333]], groups
+  pre = []
+  'x-y-z'.gsub(OnigRegexp.new('[a-z]')) { pre << OnigRegexp.last_match.pre_match; 'Q' }
+  assert_equal ['', 'x-', 'x-y-'], pre
+end
+
+assert('String#index with a regexp and a position') do
+  re = OnigRegexp.new('o')
+  assert_equal 4, 'hello world'.index(re)
+  assert_equal 7, 'hello world'.index(re, 5)
+  assert_nil 'hello world'.index(re, 8)
+  assert_equal 3, 'abc'.index(OnigRegexp.new('$'), 3)
+  assert_nil 'abc'.index(OnigRegexp.new('x'), 1)
+  assert_equal 'o', OnigRegexp.last_match(0) if 'hello world'.index(re, 5)
 end
 
 Regexp = prev_regexp

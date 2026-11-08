@@ -10,13 +10,31 @@ class OnigRegexp
     @memo[as]
   end
 
-  # ISO 15.2.15.6.3
-  def self.last_match
-    @last_match
+  # ISO 15.2.15.6.3. With an index, the group of the last match (CRuby's Regexp.last_match(n)).
+  def self.last_match(index = nil)
+    return @last_match if index.nil? || @last_match.nil?
+
+    @last_match[index]
   end
 
   def self.last_match=(match)
     @last_match = match
+  end
+
+  # True when +obj+ is usable as a regexp argument. This accepts both
+  # OnigRegexp and the (possibly distinct) core Regexp, since another Regexp
+  # implementation may define the Regexp constant when built alongside.
+  def self.regexp_arg?(obj)
+    obj.is_a?(OnigRegexp) || obj.is_a?(Regexp)
+  end
+
+  # Run the block while preserving OnigRegexp.last_match around it, so that
+  # mutating helpers (e.g. String#slice!) do not clobber the last match.
+  def self.preserving_last_match
+    lm = last_match
+    yield
+  ensure
+    self.last_match = lm
   end
 
   # ISO 15.2.15.7.2
@@ -39,6 +57,19 @@ class OnigRegexp
 
   # ISO 15.2.15.7.8
   attr_reader :source
+end
+
+class OnigMatchData
+  def named_captures(symbolize_names: false)
+    names.to_h do |name|
+      n = symbolize_names ? name.to_sym : name
+      [n, self[n]]
+    end
+  end
+
+  def names
+    regexp.names
+  end
 end
 
 class String
@@ -70,7 +101,7 @@ class String
   alias_method :old_square_brancket_equal, :[]=
 
   def [](*args)
-    return old_square_brancket(*args) unless args[0].class == Regexp
+    return old_square_brancket(*args) unless OnigRegexp.regexp_arg?(args[0])
 
     if args.size == 2
       match = args[0].match(self)
@@ -94,17 +125,19 @@ class String
   alias_method :slice, :[]
 
   def []=(*args)
-    return old_square_brancket_equal(*args) unless args[0].class == Regexp
+    return old_square_brancket_equal(*args) unless OnigRegexp.regexp_arg?(args[0])
 
     n_args = args.size
     case n_args
     when 2
       match = args[0].match(self)
-      self[match.begin(0)...match.end(0)] = args[1]
+      beg = match.begin(0)
+      self[beg, match.end(0) - beg] = args[1]
     when 3
       match = args[0].match(self)
       n = args[1]
-      self[match.begin(n)...match.end(n)] = args[2]
+      beg = match.begin(n)
+      self[beg, match.end(n) - beg] = args[2]
     else
       raise ArgumentError, "wrong number of arguments (#{n_args} for 2..3)"
     end
@@ -117,10 +150,8 @@ class String
       result = slice(*args)
       nth = args[0]
 
-      if nth.class == Regexp
-        lm = Regexp.last_match
-        self[nth] = '' if result
-        Regexp.last_match = lm
+      if OnigRegexp.regexp_arg?(nth)
+        OnigRegexp.preserving_last_match { self[nth] = '' if result }
       else
         self[nth] = '' if result
       end
@@ -130,10 +161,8 @@ class String
       nth = args[0]
       len = args[1]
 
-      if nth.class == Regexp
-        lm = Regexp.last_match
-        self[nth, len] = '' if result
-        Regexp.last_match = lm
+      if OnigRegexp.regexp_arg?(nth)
+        OnigRegexp.preserving_last_match { self[nth, len] = '' if result }
       else
         self[nth, len] = '' if result && nth != self.size
       end
@@ -145,7 +174,14 @@ class String
   alias_method :old_index, :index
 
   def index(pattern, pos=0)
-    if pattern.class == Regexp
+    # Single-byte text (byte and character offsets agree): search from the offset in place. Taking self[pos..-1] and
+    # matching that copied the tail on every call, which made a loop of index(regexp, pos) over a large text quadratic.
+    # MatchData#begin and match's position are byte offsets, as they are here.
+    if pattern.is_a?(OnigRegexp) && pos.is_a?(Integer) && pos >= 0 && pos < bytesize && bytesize == size
+      match_data = pattern.match(self, pos)
+      return match_data && match_data.begin(0)
+    end
+    if OnigRegexp.regexp_arg?(pattern)
       str = self[pos..-1]
       if str
         if num = (pattern =~ str)
