@@ -302,6 +302,11 @@ onig_match_common(mrb_state* mrb, OnigRegex reg, mrb_value match_value, mrb_valu
     mrb_raise(mrb, E_REGEXP_ERROR, err);
   }
 
+  if (result != ONIG_MISMATCH) {
+    /* scan and gsub match again into the same MatchData: drop what the last match cached (match_data_to_a), or
+       Regexp.last_match and $~ in the block would keep reading the first match. */
+    mrb_iv_set(mrb, match_value, MRB_SYM(cache), mrb_nil_value());
+  }
   mrb_obj_iv_set(mrb, (struct RObject*)ONIG_REGEXP_CLASS(mrb), MRB_IVSYM(last_match), MISMATCH_NIL_OR(match_value));
 
   if (mrb_class_get_id(mrb, MRB_SYM(Regexp)) == ONIG_REGEXP_CLASS(mrb) &&

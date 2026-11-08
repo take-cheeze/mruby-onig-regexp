@@ -661,4 +661,16 @@ assert('String regexp methods accept OnigRegexp when Regexp is foreign') do
   assert_equal 'hlo', string
 end
 
+assert('OnigRegexp.last_match in the block of scan and gsub is the current match') do
+  seen = []
+  'a1 b22 c333'.scan(OnigRegexp.new('[a-z]\\d+')) { seen << OnigRegexp.last_match(0) }
+  assert_equal %w[a1 b22 c333], seen
+  groups = []
+  'a1 b22 c333'.scan(OnigRegexp.new('([a-z])(\\d+)')) { groups << [OnigRegexp.last_match(1), OnigRegexp.last_match(2)] }
+  assert_equal [%w[a 1], %w[b 22], %w[c 333]], groups
+  pre = []
+  'x-y-z'.gsub(OnigRegexp.new('[a-z]')) { pre << OnigRegexp.last_match.pre_match; 'Q' }
+  assert_equal ['', 'x-', 'x-y-'], pre
+end
+
 Regexp = prev_regexp
