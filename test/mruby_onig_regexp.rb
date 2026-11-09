@@ -296,6 +296,17 @@ assert('OnigMatchData offsets count characters in a UTF-8 String') do
   assert_equal(utf8 ? 7 : 9, str.index(OnigRegexp.new('\(d'), 1))
 end
 
+assert('OnigRegexp.union') do
+  re = OnigRegexp.union('a.b', OnigRegexp.new('c+', OnigRegexp::IGNORECASE))
+  assert_true re.match?('xa.by')
+  assert_false re.match?('axb')
+  assert_true re.match?('CC')
+  assert_true OnigRegexp.union(['x', 'y']).match?('y')
+  assert_nil OnigRegexp.union.match('anything')
+  lone = OnigRegexp.new('z')
+  assert_same lone, OnigRegexp.union(lone)
+end
+
 assert('OnigMatchData#post_match', '15.2.16.3.8') do
   assert_equal '-', onig_match_data_example.post_match
 end

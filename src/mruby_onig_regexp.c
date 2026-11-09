@@ -319,11 +319,12 @@ onig_match_common(mrb_state* mrb, OnigRegex reg, mrb_value match_value, mrb_valu
 }
 
 /* With MRB_UTF8_STRING, String indexes count characters, as in CRuby: MatchData offsets and the `pos` argument of
- * match/match? are character offsets there, converted at this boundary (the region keeps byte offsets). */
+ * match/match? are character offsets there, converted at this boundary (the region keeps byte offsets). A /n
+ * (ASCII) regexp works on bytes, so its offsets stay byte offsets. */
 static mrb_int
-onig_byte_to_char(mrb_value str, mrb_int byte_offset) {
+onig_byte_to_char(OnigRegex reg, mrb_value str, mrb_int byte_offset) {
 #ifdef MRB_UTF8_STRING
-  if (byte_offset <= 0) return byte_offset;
+  if (byte_offset <= 0 || (reg && onig_get_encoding(reg) != ONIG_ENCODING_UTF8)) return byte_offset;
   const unsigned char *p = (const unsigned char*)RSTRING_PTR(str);
   const unsigned char *e = p + (byte_offset < RSTRING_LEN(str) ? byte_offset : RSTRING_LEN(str));
   mrb_int chars = 0;
@@ -332,15 +333,15 @@ onig_byte_to_char(mrb_value str, mrb_int byte_offset) {
   }
   return chars;
 #else
-  (void)str;
+  (void)reg; (void)str;
   return byte_offset;
 #endif
 }
 
 static mrb_int
-onig_char_to_byte(mrb_value str, mrb_int char_offset) {
+onig_char_to_byte(OnigRegex reg, mrb_value str, mrb_int char_offset) {
 #ifdef MRB_UTF8_STRING
-  if (char_offset <= 0) return char_offset;
+  if (char_offset <= 0 || onig_get_encoding(reg) != ONIG_ENCODING_UTF8) return char_offset;
   const unsigned char *b = (const unsigned char*)RSTRING_PTR(str);
   const unsigned char *p = b, *e = b + RSTRING_LEN(str);
   while (char_offset > 0 && p < e) {
@@ -351,9 +352,16 @@ onig_char_to_byte(mrb_value str, mrb_int char_offset) {
   /* Past the end: keep the excess so callers still see an out-of-range position. */
   return (p - b) + char_offset;
 #else
-  (void)str;
+  (void)reg; (void)str;
   return char_offset;
 #endif
+}
+
+/* The regexp a MatchData came from, or NULL when it is not an OnigRegexp. */
+static OnigRegex
+match_data_regex(mrb_state *mrb, mrb_value match) {
+  mrb_value const regexp = mrb_iv_get(mrb, match, MRB_SYM(regexp));
+  return mrb_data_p(regexp) ? (OnigRegex)mrb_data_check_get_ptr(mrb, regexp, &mrb_onig_regexp_type) : NULL;
 }
 
 static mrb_value
@@ -381,12 +389,12 @@ onig_regexp_match(mrb_state *mrb, mrb_value self) {
     return mrb_nil_value();
   }
   str = reg_operand(mrb, str);
-  pos = onig_char_to_byte(str, pos);
+  Data_Get_Struct(mrb, self, &mrb_onig_regexp_type, reg);
+  pos = onig_char_to_byte(reg, str, pos);
   if (pos < 0 || (pos > 0 && pos >= RSTRING_LEN(str))) {
     return mrb_nil_value();
   }
 
-  Data_Get_Struct(mrb, self, &mrb_onig_regexp_type, reg);
 
   mrb_value const ret = create_onig_region(mrb, str, self);
   if (onig_match_common(mrb, reg, ret, str, pos) == ONIG_MISMATCH) {
@@ -412,12 +420,12 @@ onig_regexp_match_p(mrb_state *mrb, mrb_value self) {
     return mrb_nil_value();
   }
   str = reg_operand(mrb, str);
-  pos = onig_char_to_byte(str, pos);
+  Data_Get_Struct(mrb, self, &mrb_onig_regexp_type, reg);
+  pos = onig_char_to_byte(reg, str, pos);
   if (pos < 0 || (pos > 0 && pos >= RSTRING_LEN(str))) {
     return mrb_nil_value();
   }
 
-  Data_Get_Struct(mrb, self, &mrb_onig_regexp_type, reg);
   str_ptr = (OnigUChar const*)RSTRING_PTR(str);
   return mrb_bool_value(onig_search(
       reg, str_ptr, str_ptr + RSTRING_LEN(str),
@@ -432,7 +440,7 @@ string_match_p(mrb_state *mrb, mrb_value self) {
   OnigUChar const* str_ptr;
 
   mrb_get_args(mrb, "d|i", &reg, &mrb_onig_regexp_type, &pos);
-  pos = onig_char_to_byte(str, pos);
+  pos = onig_char_to_byte(reg, str, pos);
   if (pos < 0 || (pos > 0 && pos >= RSTRING_LEN(str))) {
     return mrb_nil_value();
   }
@@ -760,7 +768,7 @@ match_data_begin(mrb_state* mrb, mrb_value self) {
   Data_Get_Struct(mrb, self, &mrb_onig_region_type, reg);
   mrb_int const idx = match_data_actual_index(mrb, self, idx_value);
   match_data_check_index(idx);
-  return mrb_fixnum_value(onig_byte_to_char(mrb_iv_get(mrb, self, MRB_SYM(string)), reg->beg[idx]));
+  return mrb_fixnum_value(onig_byte_to_char(match_data_regex(mrb, self), mrb_iv_get(mrb, self, MRB_SYM(string)), reg->beg[idx]));
 }
 
 // ISO 15.2.16.3.3
@@ -779,7 +787,7 @@ match_data_end(mrb_state* mrb, mrb_value self) {
   Data_Get_Struct(mrb, self, &mrb_onig_region_type, reg);
   mrb_int const idx = match_data_actual_index(mrb, self, idx_value);
   match_data_check_index(idx);
-  return mrb_fixnum_value(onig_byte_to_char(mrb_iv_get(mrb, self, MRB_SYM(string)), reg->end[idx]));
+  return mrb_fixnum_value(onig_byte_to_char(match_data_regex(mrb, self), mrb_iv_get(mrb, self, MRB_SYM(string)), reg->end[idx]));
 }
 
 // ISO 15.2.16.3.5
@@ -821,8 +829,8 @@ match_data_offset(mrb_state* mrb, mrb_value self) {
   match_data_check_index(idx);
   mrb_value ret = mrb_ary_new_capa(mrb, 2);
   mrb_value const str = mrb_iv_get(mrb, self, MRB_SYM(string));
-  mrb_ary_push(mrb, ret, mrb_fixnum_value(onig_byte_to_char(str, reg->beg[idx])));
-  mrb_ary_push(mrb, ret, mrb_fixnum_value(onig_byte_to_char(str, reg->end[idx])));
+  mrb_ary_push(mrb, ret, mrb_fixnum_value(onig_byte_to_char(match_data_regex(mrb, self), str, reg->beg[idx])));
+  mrb_ary_push(mrb, ret, mrb_fixnum_value(onig_byte_to_char(match_data_regex(mrb, self), str, reg->end[idx])));
   return ret;
 }
 
