@@ -281,6 +281,32 @@ assert('OnigMatchData#offset', '15.2.16.3.7') do
   assert_equal [1, 5], onig_match_data_example.offset(1)
 end
 
+assert('OnigMatchData offsets count characters in a UTF-8 String') do
+  # "\u00e9" is two bytes; offsets and the match position are character indexes, as String#[] takes.
+  str = "\u00e9a(b)\u00e9c(d)"
+  m = OnigRegexp.new('\((\w)\)').match(str)
+  utf8 = "\u00e9".size == 1
+  assert_equal(utf8 ? 2 : 3, m.begin(0))
+  assert_equal(utf8 ? 5 : 6, m.end(0))
+  assert_equal(utf8 ? [3, 4] : [4, 5], m.offset(1))
+  assert_equal '(b)', str[m.begin(0)...m.end(0)]
+  m2 = OnigRegexp.new('\((\w)\)').match(str, m.end(0))
+  assert_equal '(d)', str[m2.begin(0)...m2.end(0)]
+  assert_equal(utf8 ? 7 : 9, OnigRegexp.new('\(d') =~ str)
+  assert_equal(utf8 ? 7 : 9, str.index(OnigRegexp.new('\(d'), 1))
+end
+
+assert('OnigRegexp.union') do
+  re = OnigRegexp.union('a.b', OnigRegexp.new('c+', OnigRegexp::IGNORECASE))
+  assert_true re.match?('xa.by')
+  assert_false re.match?('axb')
+  assert_true re.match?('CC')
+  assert_true OnigRegexp.union(['x', 'y']).match?('y')
+  assert_nil OnigRegexp.union.match('anything')
+  lone = OnigRegexp.new('z')
+  assert_same lone, OnigRegexp.union(lone)
+end
+
 assert('OnigMatchData#post_match', '15.2.16.3.8') do
   assert_equal '-', onig_match_data_example.post_match
 end

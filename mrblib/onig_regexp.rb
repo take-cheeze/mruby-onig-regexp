@@ -10,6 +10,16 @@ class OnigRegexp
     @memo[as]
   end
 
+  # CRuby's Regexp.union: Strings are escaped, Regexps embedded with their options; one Array argument lists the
+  # patterns, and a lone Regexp is returned as it is.
+  def self.union(*patterns)
+    patterns = patterns[0] if patterns.size == 1 && patterns[0].is_a?(Array)
+    return new('(?!)') if patterns.empty?
+    return patterns[0] if patterns.size == 1 && regexp_arg?(patterns[0])
+
+    new(patterns.map { |pattern| regexp_arg?(pattern) ? pattern.to_s : escape(pattern.to_str) }.join('|'))
+  end
+
   # ISO 15.2.15.6.3. With an index, the group of the last match (CRuby's Regexp.last_match(n)).
   def self.last_match(index = nil)
     return @last_match if index.nil? || @last_match.nil?
@@ -176,7 +186,7 @@ class String
   def index(pattern, pos=0)
     # Single-byte text (byte and character offsets agree): search from the offset in place. Taking self[pos..-1] and
     # matching that copied the tail on every call, which made a loop of index(regexp, pos) over a large text quadratic.
-    # MatchData#begin and match's position are byte offsets, as they are here.
+    # Byte and character offsets agree on this text, so MatchData#begin is the index.
     if pattern.is_a?(OnigRegexp) && pos.is_a?(Integer) && pos >= 0 && pos < bytesize && bytesize == size
       match_data = pattern.match(self, pos)
       return match_data && match_data.begin(0)
