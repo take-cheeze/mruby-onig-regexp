@@ -321,10 +321,28 @@ onig_match_common(mrb_state* mrb, OnigRegex reg, mrb_value match_value, mrb_valu
 /* With MRB_UTF8_STRING, String indexes count characters, as in CRuby: MatchData offsets and the `pos` argument of
  * match/match? are character offsets there, converted at this boundary (the region keeps byte offsets). A /n
  * (ASCII) regexp works on bytes, so its offsets stay byte offsets. */
+#ifdef MRB_UTF8_STRING
+/* A string with no byte past 0x7F counts one character per byte, so both conversions are the identity. The answer is
+ * kept in the string's MRB_STR_SINGLE_BYTE flag, which mruby clears on every modification: a scan or a match loop over
+ * one large source pays the one pass, not one per offset. */
+static mrb_bool
+onig_single_byte_p(mrb_value str) {
+  struct RString *s = mrb_str_ptr(str);
+  if (RSTR_SINGLE_BYTE_P(s)) return TRUE;
+  const unsigned char *p = (const unsigned char*)RSTR_PTR(s), *e = p + RSTR_LEN(s);
+  for (; p < e; ++p) {
+    if (*p & 0x80) return FALSE;
+  }
+  RSTR_SET_SINGLE_BYTE_FLAG(s);
+  return TRUE;
+}
+#endif
+
 static mrb_int
 onig_byte_to_char(OnigRegex reg, mrb_value str, mrb_int byte_offset) {
 #ifdef MRB_UTF8_STRING
   if (byte_offset <= 0 || (reg && onig_get_encoding(reg) != ONIG_ENCODING_UTF8)) return byte_offset;
+  if (onig_single_byte_p(str)) return byte_offset < RSTRING_LEN(str) ? byte_offset : RSTRING_LEN(str);
   const unsigned char *p = (const unsigned char*)RSTRING_PTR(str);
   const unsigned char *e = p + (byte_offset < RSTRING_LEN(str) ? byte_offset : RSTRING_LEN(str));
   mrb_int chars = 0;
@@ -342,6 +360,7 @@ static mrb_int
 onig_char_to_byte(OnigRegex reg, mrb_value str, mrb_int char_offset) {
 #ifdef MRB_UTF8_STRING
   if (char_offset <= 0 || onig_get_encoding(reg) != ONIG_ENCODING_UTF8) return char_offset;
+  if (onig_single_byte_p(str)) return char_offset;
   const unsigned char *b = (const unsigned char*)RSTRING_PTR(str);
   const unsigned char *p = b, *e = b + RSTRING_LEN(str);
   while (char_offset > 0 && p < e) {
